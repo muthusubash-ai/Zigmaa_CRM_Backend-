@@ -53,6 +53,7 @@ def authentication_response(user):
 
 
 class LoginView(APIView):
+    authentication_classes = []
     permission_classes = [AllowAny]
     throttle_classes = [ScopedRateThrottle]
     throttle_scope = "login"
@@ -67,6 +68,7 @@ class LoginView(APIView):
 
 
 class GoogleLoginView(APIView):
+    authentication_classes = []
     permission_classes = [AllowAny]
     throttle_classes = [ScopedRateThrottle]
     throttle_scope = "google_login"
@@ -142,6 +144,7 @@ class GoogleLoginView(APIView):
 
 
 class ForgotPasswordView(APIView):
+    authentication_classes = []
     permission_classes = [AllowAny]
     throttle_classes = [ScopedRateThrottle]
     throttle_scope = "password_reset"
@@ -172,6 +175,7 @@ class ForgotPasswordView(APIView):
 
 
 class ResetPasswordView(APIView):
+    authentication_classes = []
     permission_classes = [AllowAny]
     throttle_classes = [ScopedRateThrottle]
     throttle_scope = "password_reset_confirm"
@@ -190,6 +194,7 @@ class ResetPasswordView(APIView):
 
 
 class RefreshTokenView(APIView):
+    authentication_classes = []
     permission_classes = [AllowAny]
 
     def post(self, request):
@@ -218,7 +223,9 @@ class RefreshTokenView(APIView):
 
 
 class LogoutView(APIView):
+    authentication_classes = []
     permission_classes = [AllowAny]
+
 
     def post(self, request):
         raw_refresh_token = request.COOKIES.get(settings.JWT_AUTH_COOKIE_NAME)
