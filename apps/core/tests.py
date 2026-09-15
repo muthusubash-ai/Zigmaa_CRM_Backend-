@@ -1,10 +1,13 @@
+from datetime import timedelta
+from decimal import Decimal
 from urllib.parse import parse_qs, urlparse
 
 from django.test import TestCase, override_settings
 from django.urls import reverse
+from django.utils import timezone
 from rest_framework.test import APITestCase
 
-from .models import Role, User
+from .models import Account, Department, Employee, Role, Task, User
 
 
 class HealthCheckTests(TestCase):
@@ -126,3 +129,58 @@ class AuthenticationTests(APITestCase):
 
         self.assertEqual(response.status_code, 200)
         self.assertNotIn("reset_link", response.data)
+
+
+class SuperAdminDashboardTests(APITestCase):
+    @classmethod
+    def setUpTestData(cls):
+        admin_role = Role.objects.create(name="Super Admin")
+        employee_role = Role.objects.create(name="Employee")
+        cls.admin_user = User.objects.create_user(
+            email="admin@zigmaa.test", password="StrongPass123!",
+            full_name="Test Admin", phone="9999999998", role=admin_role,
+            is_staff=True, is_superuser=True,
+        )
+        cls.employee_user = User.objects.create_user(
+            email="dashboard.employee@zigmaa.test", password="StrongPass123!",
+            full_name="Dashboard Employee", phone="9999999997", role=employee_role,
+        )
+        department = Department.objects.create(name="Engineering")
+        cls.employee = Employee.objects.create(
+            user=cls.employee_user, department=department, employee_code="ZG-001",
+            designation="Developer", date_of_joining=timezone.localdate(),
+            salary=Decimal("50000.00"),
+        )
+        today = timezone.localdate()
+        Task.objects.create(
+            assigned_to=cls.employee, assigned_by=cls.admin_user,
+            title="Today dashboard task", priority="high", status="in_progress",
+            start_date=today, due_date=today,
+        )
+        Task.objects.create(
+            assigned_to=cls.employee, assigned_by=cls.admin_user,
+            title="Completed dashboard task", priority="medium", status="Completed",
+            start_date=today - timedelta(days=2), due_date=today - timedelta(days=1),
+            completed_at=today,
+        )
+        Account.objects.create(
+            account_type="Revenue", title="Today payment", amount=Decimal("12500.00"),
+            date=today, status="Completed", created_by=cls.admin_user,
+        )
+
+    def test_super_admin_can_load_dashboard_summary(self):
+        self.client.force_authenticate(self.admin_user)
+        response = self.client.get(reverse("super-admin-dashboard"))
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.data["metrics"]["today_tasks"], 1)
+        self.assertEqual(response.data["metrics"]["completed_tasks"], 1)
+        self.assertEqual(response.data["metrics"]["today_revenue"], "12500.00")
+        self.assertEqual(response.data["metrics"]["total_employees"], 1)
+        self.assertEqual(len(response.data["recent_tasks"]), 2)
+
+    def test_employee_cannot_load_super_admin_dashboard(self):
+        self.client.force_authenticate(self.employee_user)
+        response = self.client.get(reverse("super-admin-dashboard"))
+
+        self.assertEqual(response.status_code, 403)

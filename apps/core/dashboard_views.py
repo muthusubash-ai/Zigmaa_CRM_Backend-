@@ -44,7 +44,7 @@ class SuperAdminDashboardView(APIView):
                     "completed_tasks": Task.objects.filter(COMPLETED_TASK_STATUSES).count(),
                     "today_revenue": str(today_revenue),
                     "active_projects": Project.objects.exclude(
-                        status__in=["completed", "cancelled"]
+                        Q(status__iexact="completed") | Q(status__iexact="cancelled")
                     ).count(),
                     "total_employees": Employee.objects.filter(is_active=True).count(),
                     "pending_leaves": LeaveRequest.objects.filter(status__iexact="pending").count(),
