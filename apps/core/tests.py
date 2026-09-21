@@ -7,7 +7,7 @@ from django.urls import reverse
 from django.utils import timezone
 from rest_framework.test import APITestCase
 
-from .models import Account, Department, Employee, Role, Task, User
+from .models import Account, Department, Employee, LoginActivity, Role, RolePermission, Task, User
 
 
 class HealthCheckTests(TestCase):
@@ -21,7 +21,7 @@ class HealthCheckTests(TestCase):
 class AuthenticationTests(APITestCase):
     @classmethod
     def setUpTestData(cls):
-        role = Role.objects.create(name="Employee")
+        role, _ = Role.objects.get_or_create(name="Employee")
         cls.user = User.objects.create_user(
             email="employee@zigmaa.test",
             password="StrongPass123!",
@@ -32,7 +32,7 @@ class AuthenticationTests(APITestCase):
 
     def test_email_login_returns_access_token_and_refresh_cookie(self):
         response = self.client.post(
-            reverse("auth-login"),
+            reverse("login"),
             {"email": self.user.email, "password": "StrongPass123!"},
             format="json",
         )
@@ -42,15 +42,32 @@ class AuthenticationTests(APITestCase):
         self.assertEqual(response.data["user"]["email"], self.user.email)
         self.assertIn("zigmaa_refresh", response.cookies)
         self.assertTrue(response.cookies["zigmaa_refresh"]["httponly"])
+        activity = LoginActivity.objects.get(email=self.user.email, status="success")
+        self.assertEqual(activity.user, self.user)
+        self.assertEqual(activity.login_type, "password")
+        self.user.refresh_from_db()
+        self.assertIsNotNone(self.user.last_login)
 
     def test_invalid_password_is_rejected(self):
         response = self.client.post(
-            reverse("auth-login"),
+            reverse("login"),
             {"email": self.user.email, "password": "wrong-password"},
             format="json",
         )
 
         self.assertEqual(response.status_code, 400)
+        activity = LoginActivity.objects.get(email=self.user.email, status="failed")
+        self.assertIsNone(activity.user)
+        self.assertNotIn("wrong-password", activity.failure_reason)
+
+    def test_legacy_auth_login_endpoint_remains_available(self):
+        response = self.client.post(
+            reverse("auth-login"),
+            {"email": self.user.email, "password": "StrongPass123!"},
+            format="json",
+        )
+
+        self.assertEqual(response.status_code, 200)
 
     def test_access_token_can_load_current_user(self):
         login_response = self.client.post(
@@ -134,8 +151,8 @@ class AuthenticationTests(APITestCase):
 class SuperAdminDashboardTests(APITestCase):
     @classmethod
     def setUpTestData(cls):
-        admin_role = Role.objects.create(name="Super Admin")
-        employee_role = Role.objects.create(name="Employee")
+        admin_role, _ = Role.objects.get_or_create(name="Super Admin")
+        employee_role, _ = Role.objects.get_or_create(name="Employee")
         cls.admin_user = User.objects.create_user(
             email="admin@zigmaa.test", password="StrongPass123!",
             full_name="Test Admin", phone="9999999998", role=admin_role,
@@ -184,3 +201,92 @@ class SuperAdminDashboardTests(APITestCase):
         response = self.client.get(reverse("super-admin-dashboard"))
 
         self.assertEqual(response.status_code, 403)
+
+
+class RolePermissionAPITests(APITestCase):
+    @classmethod
+    def setUpTestData(cls):
+        cls.admin_role, _ = Role.objects.get_or_create(
+            name="Super Admin", defaults={"description": "Full system access"}
+        )
+        cls.hr_role, _ = Role.objects.get_or_create(
+            name="HR", defaults={"description": "HR operations"}
+        )
+        cls.employee_role, _ = Role.objects.get_or_create(
+            name="Employee", defaults={"description": "Employee access"}
+        )
+        cls.admin = User.objects.create_user(
+            email="rbac.admin@zigmaa.test", password="StrongPass123!",
+            full_name="RBAC Admin", phone="9999999996", role=cls.admin_role,
+            is_staff=True, is_superuser=True,
+        )
+        cls.employee_user = User.objects.create_user(
+            email="rbac.employee@zigmaa.test", password="StrongPass123!",
+            full_name="RBAC Employee", phone="9999999995", role=cls.employee_role,
+        )
+        RolePermission.objects.update_or_create(
+            role=cls.employee_role,
+            module="employees",
+            defaults={"can_view": True, "scope": "own"},
+        )
+
+    def test_current_permissions_include_actions_and_data_scope(self):
+        self.client.force_authenticate(self.employee_user)
+
+        response = self.client.get(reverse("auth-permissions"))
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.data["role"], "Employee")
+        self.assertEqual(response.data["permissions"]["employees"]["actions"], ["view"])
+        self.assertEqual(response.data["permissions"]["employees"]["scope"], "own")
+
+    def test_employee_cannot_manage_roles(self):
+        self.client.force_authenticate(self.employee_user)
+
+        response = self.client.get(reverse("role-list"))
+
+        self.assertEqual(response.status_code, 403)
+
+    def test_super_admin_can_list_only_three_system_roles(self):
+        self.client.force_authenticate(self.admin)
+
+        response = self.client.get(reverse("role-list"))
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(
+            {role["name"] for role in response.data["roles"]},
+            {"Super Admin", "HR", "Employee"},
+        )
+
+    def test_super_admin_can_update_hr_permission_matrix(self):
+        self.client.force_authenticate(self.admin)
+        response = self.client.put(
+            reverse("role-permissions", kwargs={"role_id": self.hr_role.id}),
+            {
+                "permissions": {
+                    "employees": {"actions": ["view", "edit"], "scope": "all"},
+                    "leave": {"actions": ["view", "approve"], "scope": "all"},
+                }
+            },
+            format="json",
+        )
+
+        self.assertEqual(response.status_code, 200)
+        employee_access = RolePermission.objects.get(
+            role=self.hr_role, module="employees"
+        )
+        self.assertTrue(employee_access.can_view)
+        self.assertTrue(employee_access.can_edit)
+        self.assertFalse(employee_access.can_delete)
+        self.assertEqual(employee_access.scope, "all")
+
+    def test_super_admin_permissions_cannot_be_reduced(self):
+        self.client.force_authenticate(self.admin)
+
+        response = self.client.put(
+            reverse("role-permissions", kwargs={"role_id": self.admin_role.id}),
+            {"permissions": {}},
+            format="json",
+        )
+
+        self.assertEqual(response.status_code, 400)

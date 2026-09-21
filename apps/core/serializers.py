@@ -7,14 +7,21 @@ from django.utils.http import urlsafe_base64_decode
 from rest_framework import serializers
 
 from .models import User
+from .rbac import permission_payload_for
 
 
 class UserSerializer(serializers.ModelSerializer):
     role = serializers.CharField(source="role.name", read_only=True)
+    permissions = serializers.SerializerMethodField()
+
+    def get_permissions(self, user):
+        return permission_payload_for(user)
 
     class Meta:
         model = User
-        fields = ("id", "email", "full_name", "phone", "profile_image", "role")
+        fields = (
+            "id", "email", "full_name", "phone", "profile_image", "role", "permissions"
+        )
 
 
 class LoginSerializer(serializers.Serializer):
@@ -31,6 +38,8 @@ class LoginSerializer(serializers.Serializer):
             raise serializers.ValidationError("Invalid email or password.")
         if not user.is_active:
             raise serializers.ValidationError("This account is inactive.")
+        if not user.role.is_active:
+            raise serializers.ValidationError("This account role is inactive.")
 
         attrs["user"] = user
         return attrs

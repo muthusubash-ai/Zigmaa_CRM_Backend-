@@ -18,6 +18,47 @@ class Role(models.Model):
         return self.name
 
 
+class RolePermission(models.Model):
+    SCOPE_CHOICES = (
+        ('none', 'No access'),
+        ('own', 'Own records'),
+        ('assigned', 'Assigned records'),
+        ('department', 'Department records'),
+        ('all', 'All records'),
+    )
+
+    role = models.ForeignKey(Role, on_delete=models.CASCADE, related_name='permissions')
+    module = models.CharField(max_length=50)
+    scope = models.CharField(max_length=20, choices=SCOPE_CHOICES, default='none')
+    can_view = models.BooleanField(default=False)
+    can_create = models.BooleanField(default=False)
+    can_edit = models.BooleanField(default=False)
+    can_delete = models.BooleanField(default=False)
+    can_approve = models.BooleanField(default=False)
+    can_export = models.BooleanField(default=False)
+    can_manage = models.BooleanField(default=False)
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        db_table = 'role_permissions'
+        ordering = ['role_id', 'module']
+        constraints = [
+            models.UniqueConstraint(fields=['role', 'module'], name='unique_role_module_permission')
+        ]
+
+    @property
+    def allowed_actions(self):
+        return [
+            action
+            for action in ('view', 'create', 'edit', 'delete', 'approve', 'export', 'manage')
+            if getattr(self, f'can_{action}')
+        ]
+
+    def __str__(self):
+        return f'{self.role.name}: {self.module}'
+
+
 class UserManager(BaseUserManager):
     def create_user(self, email, password=None, **extra_fields):
         if not email:
@@ -78,6 +119,39 @@ class User(AbstractBaseUser, PermissionsMixin):
 
     def __str__(self):
         return f"{self.full_name} ({self.email})"
+
+
+class LoginActivity(models.Model):
+    LOGIN_TYPE_CHOICES = (
+        ('password', 'Password'),
+        ('google', 'Google'),
+    )
+    STATUS_CHOICES = (
+        ('success', 'Success'),
+        ('failed', 'Failed'),
+    )
+
+    user = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name='login_activities',
+    )
+    email = models.EmailField(max_length=254, db_index=True)
+    login_type = models.CharField(max_length=20, choices=LOGIN_TYPE_CHOICES, default='password')
+    status = models.CharField(max_length=20, choices=STATUS_CHOICES, db_index=True)
+    ip_address = models.GenericIPAddressField(null=True, blank=True)
+    user_agent = models.TextField(blank=True)
+    failure_reason = models.CharField(max_length=255, blank=True)
+    created_at = models.DateTimeField(auto_now_add=True, db_index=True)
+
+    class Meta:
+        db_table = 'login_activities'
+        ordering = ['-created_at']
+
+    def __str__(self):
+        return f"{self.email} - {self.status} - {self.created_at}"
 
 
 class Department(models.Model):

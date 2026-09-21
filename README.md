@@ -33,6 +33,19 @@ The health endpoint is `http://localhost:8000/api/v1/health/`.
 - `POST /api/v1/auth/refresh/` - refresh the access token from the HttpOnly cookie
 - `POST /api/v1/auth/logout/` - revoke the refresh token and clear its cookie
 - `GET /api/v1/auth/me/` - return the authenticated user
+- `GET /api/v1/auth/permissions/` - return the user's module actions and data scopes
+
+## Role and permission endpoints
+
+The active system roles are `Super Admin`, `HR`, and `Employee`.
+
+- `GET /api/v1/roles/` - list all three roles and their permission matrices (Super Admin only)
+- `GET /api/v1/roles/<id>/permissions/` - load one role matrix (Super Admin only)
+- `PUT /api/v1/roles/<id>/permissions/` - replace HR or Employee permissions (Super Admin only)
+
+Each module permission contains allowed actions and a data scope: `own`,
+`assigned`, `department`, or `all`. Super Admin access is fixed and cannot be
+reduced through the API.
 
 Set `GOOGLE_OAUTH_CLIENT_ID` in `.env` before enabling Google login. In
 production, set `DJANGO_DEBUG=False`, `JWT_AUTH_COOKIE_SECURE=True`, and

@@ -18,7 +18,7 @@ from rest_framework_simplejwt.exceptions import TokenError
 from rest_framework_simplejwt.token_blacklist.models import BlacklistedToken, OutstandingToken
 from rest_framework_simplejwt.tokens import RefreshToken
 
-from .models import Role, User
+from .models import LoginActivity, Role, User
 from .serializers import (
     ForgotPasswordSerializer,
     GoogleLoginSerializer,
@@ -52,18 +52,41 @@ def authentication_response(user):
     return response
 
 
+def create_login_activity(request, email, status_value, user=None, failure_reason=""):
+    LoginActivity.objects.create(
+        user=user,
+        email=str(email or "").strip().lower()[:254],
+        login_type="password",
+        status=status_value,
+        ip_address=request.META.get("REMOTE_ADDR") or None,
+        user_agent=request.META.get("HTTP_USER_AGENT", "")[:1000],
+        failure_reason=failure_reason[:255],
+    )
+
+
 class LoginView(APIView):
     authentication_classes = []
     permission_classes = [AllowAny]
     throttle_classes = [ScopedRateThrottle]
     throttle_scope = "login"
 
+    @transaction.atomic
     def post(self, request):
         serializer = LoginSerializer(data=request.data, context={"request": request})
-        serializer.is_valid(raise_exception=True)
+        if not serializer.is_valid():
+            email = request.data.get("email", "") if hasattr(request.data, "get") else ""
+            create_login_activity(
+                request,
+                email,
+                "failed",
+                failure_reason="Invalid credentials or login payload.",
+            )
+            return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+
         user = serializer.validated_data["user"]
         user.last_login = timezone.now()
         user.save(update_fields=["last_login"])
+        create_login_activity(request, user.email, "success", user=user)
         return authentication_response(user)
 
 
