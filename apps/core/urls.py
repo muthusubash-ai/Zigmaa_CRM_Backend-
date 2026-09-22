@@ -10,6 +10,7 @@ from .auth_views import (
     RefreshTokenView,
 )
 from .dashboard_views import SuperAdminDashboardView
+from .employee_views import EmployeeDetailView, EmployeeListCreateView
 from .rbac_views import CurrentPermissionsView, RoleListView, RolePermissionsView
 from .views import health_check
 
@@ -27,4 +28,6 @@ urlpatterns = [
     path("roles/", RoleListView.as_view(), name="role-list"),
     path("roles/<int:role_id>/permissions/", RolePermissionsView.as_view(), name="role-permissions"),
     path("dashboard/super-admin/", SuperAdminDashboardView.as_view(), name="super-admin-dashboard"),
+    path("employees/", EmployeeListCreateView.as_view(), name="employee-list-create"),
+    path("employees/<int:employee_id>/", EmployeeDetailView.as_view(), name="employee-detail"),
 ]
